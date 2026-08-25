@@ -1,20 +1,15 @@
 //! PID 1.
 //!
-//! The kernel execs this with no environment, no mounts, and no stdio: it
-//! tries to open /dev/console for us, but the initramfs has no device nodes
-//! yet, so that fails silently and we start out unable to say anything. The
-//! first job is therefore to get a console, and only then to speak.
+//! Every kernel built with CONFIG_BLK_DEV_INITRD carries its own three-entry
+//! initramfs -- /dev, /dev/console, /root -- which is unpacked before ours and
+//! merged under it. The kernel opens that console as fds 0, 1 and 2 before
+//! handing over control, so this process can speak the moment it starts.
 
 const std = @import("std");
 const linux = std.os.linux;
 
 pub fn main() void {
-    // devtmpfs is populated by the kernel, so mounting it is the whole of
-    // device setup -- /dev/console exists the instant this returns.
-    _ = linux.mount("devtmpfs", "/dev", "devtmpfs", 0, 0);
-
-    const fd = linux.open("/dev/console", .{ .ACCMODE = .WRONLY }, 0);
-    _ = linux.write(@intCast(fd), greeting, greeting.len);
+    _ = linux.write(1, greeting, greeting.len);
 
     // Returning from PID 1 is a kernel panic. Powering off is how this
     // process is allowed to end, and it makes `zig build qemu` terminate.
