@@ -10,8 +10,18 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    // Runs on whatever we are building from, not on the target.
+    const mkcpio = b.addExecutable(.{
+        .name = "mkcpio",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/mkcpio.zig"),
+            .target = b.graph.host,
+            .optimize = .ReleaseSafe,
+        }),
+    });
+
     const kernel = b.dependency("linux", .{}).namedLazyPath("vmlinuz");
-    const initramfs = buildInitramfs(b, init);
+    const initramfs = buildInitramfs(b, mkcpio, init);
 
     b.getInstallStep().dependOn(&b.addInstallFile(initramfs, "initramfs.cpio").step);
 
@@ -36,16 +46,15 @@ pub fn build(b: *std.Build) void {
         .dependOn(&qemu.step);
 }
 
-const cpio_script =
-    \\set -eu
-    \\stage=$(mktemp -d)
-    \\trap 'rm -rf "$stage"' EXIT
-    \\cp "$1" "$stage/init"
-    \\(cd "$stage" && find . | cpio -o -H newc 2>/dev/null) > "$2"
-;
-
-fn buildInitramfs(b: *std.Build, init: *std.Build.Step.Compile) std.Build.LazyPath {
-    const cpio = b.addSystemCommand(&.{ "sh", "-c", cpio_script, "cpio_script" });
-    cpio.addArtifactArg(init);
-    return cpio.addOutputFileArg("initramfs.cpio");
+fn buildInitramfs(
+    b: *std.Build,
+    mkcpio: *std.Build.Step.Compile,
+    init: *std.Build.Step.Compile,
+) std.Build.LazyPath {
+    const run = b.addRunArtifact(mkcpio);
+    const initramfs = run.addOutputFileArg("initramfs.cpio");
+    run.addArgs(&.{ "file", "/init", "755" });
+    // Passing the binary as its own argument is what makes it a tracked input.
+    run.addArtifactArg(init);
+    return initramfs;
 }
