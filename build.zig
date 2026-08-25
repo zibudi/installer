@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
     const mkcpio = b.addExecutable(.{
         .name = "mkcpio",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/mkcpio.zig"),
+            .root_source_file = b.path("tools/mkcpio.zig"),
             .target = b.graph.host,
             .optimize = .ReleaseSafe,
         }),
