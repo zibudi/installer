@@ -41,32 +41,11 @@ fn make(step: *Step, options: Step.MakeOptions) !void {
     const io = b.graph.io;
     const i: *Initramfs = @fieldParentPtr("step", step);
 
-    // The cache key has to be built by hand: HashHelper.add only knows
-    // bool, int, enum and array, so every field is listed explicitly.
-    var man = b.graph.cache.obtain();
-    defer man.deinit();
-    man.hash.addBytes("zibudi-initramfs-v1");
-    for (i.entries) |e| {
-        man.hash.add(std.meta.activeTag(e));
-        switch (e) {
-            // A LazyPath is a handle, not a value: what matters is the bytes
-            // it resolves to, so the file goes into the manifest instead.
-            .file => |f| {
-                std.hash.autoHashStrat(&man.hash.hasher, .{ f.path, f.mode }, .DeepRecursive);
-                _ = try man.addFile(f.source.getPath2(b, step), null);
-            },
-            inline else => |v| std.hash.autoHashStrat(&man.hash.hasher, v, .DeepRecursive),
-        }
-    }
-
-    if (try step.cacheHit(&man)) {
-        i.output.path = try b.cache_root.join(b.allocator, &.{ "o", &man.final(), "initramfs.cpio" });
-        return;
-    }
-
-    const dir = "o" ++ std.fs.path.sep_str ++ man.final();
-    try b.cache_root.handle.createDirPath(io, dir);
-    const path = try b.cache_root.join(b.allocator, &.{ dir, "initramfs.cpio" });
+    // No cache manifest. Writing this archive costs about a quarter of a
+    // millisecond against a 111ms no-op build, and the bookkeeping to skip it
+    // ran longer than the writer. One archive per build, so a fixed path does.
+    try b.cache_root.handle.createDirPath(io, "initramfs");
+    const path = try b.cache_root.join(b.allocator, &.{ "initramfs", "initramfs.cpio" });
 
     const out = try std.Io.Dir.cwd().createFile(io, path, .{});
     defer out.close(io);
@@ -77,11 +56,10 @@ fn make(step: *Step, options: Step.MakeOptions) !void {
     for (i.entries) |e| switch (e) {
         .dir => |d| try ar.dir(d.path, d.mode),
         .node => |n| try ar.node(n.path, n.mode, n.kind, n.major, n.minor),
-        .symlink => |s| try ar.symlink(s.path, s.target),
+        .symlink => |sl| try ar.symlink(sl.path, sl.target),
         .file => |f| try ar.file(f.path, f.mode, try std.Io.Dir.cwd().readFileAlloc(io, f.source.getPath2(b, step), b.allocator, .unlimited)),
     };
     try ar.finish();
 
     i.output.path = path;
-    try step.writeManifest(&man);
 }
