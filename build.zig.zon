@@ -3,7 +3,12 @@
     .version = "0.0.0",
     .fingerprint = 0xac75bf493108bea1,
     .minimum_zig_version = "0.16.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .linux = .{
+            .url = "git+https://github.com/zibudi/linux.git#170129c2b90d99615ef564e189b525e16d54d449",
+            .hash = "linux-6.12.94-6a1KLtQGAAC_ouDuVahc9c71d0TPokelxXsJjDhTIixz",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

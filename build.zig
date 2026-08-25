@@ -1,10 +1,5 @@
 const std = @import("std");
 
-// Alpine's VM kernel, borrowed until we build our own. This URL is not
-// versioned -- Alpine overwrites it in place -- so a stable-release bump swaps
-// the kernel out from under us. Fine for now; a real pin comes with our own build.
-const kernel_url = "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/x86_64/netboot/vmlinuz-virt";
-
 pub fn build(b: *std.Build) void {
     const target = b.resolveTargetQuery(.{
         .cpu_arch = .x86_64,
@@ -24,7 +19,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    const kernel = fetchKernel(b);
+    const kernel = b.dependency("linux", .{}).namedLazyPath("vmlinuz");
     const initramfs = buildInitramfs(b, init);
 
     b.getInstallStep().dependOn(&b.addInstallFile(kernel, "vmlinuz").step);
@@ -52,13 +47,6 @@ pub fn build(b: *std.Build) void {
 
     b.step("qemu", "boot the initramfs and print what init says")
         .dependOn(&qemu.step);
-}
-
-fn fetchKernel(b: *std.Build) std.Build.LazyPath {
-    const curl = b.addSystemCommand(&.{ "curl", "-fsSL", "-o" });
-    const out = curl.addOutputFileArg("vmlinuz");
-    curl.addArg(kernel_url);
-    return out;
 }
 
 // /dev is empty but must exist: init mounts devtmpfs onto it to get a console.
