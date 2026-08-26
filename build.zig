@@ -22,8 +22,9 @@ pub fn build(b: *std.Build) void {
     mkcpio_mod.linkLibrary(libarchive.artifact("archive"));
     const mkcpio = b.addExecutable(.{ .name = "mkcpio", .root_module = mkcpio_mod });
 
-    const kernel = b.dependency("linux", .{}).namedLazyPath("vmlinuz");
-    const initramfs = buildInitramfs(b, mkcpio, init);
+    const linux = b.dependency("linux", .{});
+    const kernel = linux.namedLazyPath("vmlinuz");
+    const initramfs = buildInitramfs(b, mkcpio, init, linux.namedLazyPath("modules"));
 
     b.getInstallStep().dependOn(&b.addInstallFile(initramfs, "initramfs.cpio").step);
 
@@ -42,21 +43,36 @@ pub fn build(b: *std.Build) void {
     qemu.addFileArg(kernel);
     qemu.addArg("-initrd");
     qemu.addFileArg(initramfs);
+    qemu.addArg("-drive");
+    // -drive options are order-independent, so putting file= last lets the
+    // whole thing be one argument.
+    qemu.addPrefixedFileArg("if=virtio,format=raw,file=", scratchDisk(b));
     qemu.has_side_effects = true;
 
     b.step("qemu", "boot the initramfs and print what init says")
         .dependOn(&qemu.step);
 }
 
+/// Something for the installer to find. qemu-img ships with the qemu this
+/// step already needs.
+fn scratchDisk(b: *std.Build) std.Build.LazyPath {
+    const create = b.addSystemCommand(&.{ "qemu-img", "create", "-f", "raw" });
+    const img = create.addOutputFileArg("disk.img");
+    create.addArg("256M");
+    return img;
+}
+
 fn buildInitramfs(
     b: *std.Build,
     mkcpio: *std.Build.Step.Compile,
     init: *std.Build.Step.Compile,
+    modules: std.Build.LazyPath,
 ) std.Build.LazyPath {
     const run = b.addRunArtifact(mkcpio);
     const initramfs = run.addOutputFileArg("initramfs.cpio");
-    // The only two paths the build graph knows and mkcpio cannot. What goes
-    // in the archive is mkcpio's own business.
+    // The only paths the build graph knows and mkcpio cannot. What goes in
+    // the archive is mkcpio's own business.
     run.addArtifactArg(init);
+    run.addDirectoryArg(modules);
     return initramfs;
 }

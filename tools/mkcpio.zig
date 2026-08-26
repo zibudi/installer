@@ -1,6 +1,6 @@
 //! Packs the initramfs.
 //!
-//!     mkcpio <out.cpio> <init>
+//!     mkcpio <out.cpio> <init> <modules-dir>
 //!
 //! The archive's shape lives below in contents(), not in arguments -- the two
 //! paths are the only things the build graph knows and this program cannot.
@@ -26,17 +26,20 @@ const AE = struct {
 
 fn contents(w: *Writer) !void {
     try w.file("/init", 0o755, w.arg_init);
+    try w.dir("/modules", 0o755);
+    try w.file("/modules/virtio_blk.ko", 0o644, try w.in(w.arg_modules, "virtio_blk.ko"));
 }
 
 pub fn main(init: std.process.Init) !void {
     const argv = try init.minimal.args.toSlice(init.arena.allocator());
-    if (argv.len < 3) return error.Usage;
+    if (argv.len < 4) return error.Usage;
 
     var w: Writer = .{
         .io = init.io,
         .arena = init.arena.allocator(),
         .a = c.archive_write_new() orelse return error.ArchiveInit,
         .arg_init = argv[2],
+        .arg_modules = argv[3],
     };
     defer _ = c.archive_write_free(w.a);
 
@@ -51,7 +54,12 @@ const Writer = struct {
     arena: std.mem.Allocator,
     a: *c.archive,
     arg_init: []const u8,
+    arg_modules: []const u8,
     ino: i64 = 1,
+
+    fn in(w: *Writer, dir_path: []const u8, name: []const u8) ![]const u8 {
+        return std.fmt.allocPrint(w.arena, "{s}/{s}", .{ dir_path, name });
+    }
 
     fn file(w: *Writer, path: []const u8, mode: u32, source: []const u8) !void {
         const bytes = try std.Io.Dir.cwd().readFileAlloc(w.io, source, w.arena, .unlimited);
