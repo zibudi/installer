@@ -1,5 +1,4 @@
 const std = @import("std");
-const Initramfs = @import("tools/Initramfs.zig");
 
 pub fn build(b: *std.Build) void {
     const init = b.addExecutable(.{
@@ -11,10 +10,20 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    // Runs on the build machine, so it links libarchive rather than carrying
+    // a newc encoder of our own.
+    const host = b.graph.host;
+    const libarchive = b.dependency("libarchive", .{ .target = host, .optimize = .ReleaseSafe });
+    const mkcpio_mod = b.createModule(.{
+        .root_source_file = b.path("tools/mkcpio.zig"),
+        .target = host,
+        .optimize = .ReleaseSafe,
+    });
+    mkcpio_mod.linkLibrary(libarchive.artifact("archive"));
+    const mkcpio = b.addExecutable(.{ .name = "mkcpio", .root_module = mkcpio_mod });
+
     const kernel = b.dependency("linux", .{}).namedLazyPath("vmlinuz");
-    const initramfs = Initramfs.create(b, &.{
-        .{ .file = .{ .path = "/init", .mode = 0o755, .source = init.getEmittedBin() } },
-    }).getOutput();
+    const initramfs = buildInitramfs(b, mkcpio, init);
 
     b.getInstallStep().dependOn(&b.addInstallFile(initramfs, "initramfs.cpio").step);
 
@@ -37,4 +46,17 @@ pub fn build(b: *std.Build) void {
 
     b.step("qemu", "boot the initramfs and print what init says")
         .dependOn(&qemu.step);
+}
+
+fn buildInitramfs(
+    b: *std.Build,
+    mkcpio: *std.Build.Step.Compile,
+    init: *std.Build.Step.Compile,
+) std.Build.LazyPath {
+    const run = b.addRunArtifact(mkcpio);
+    const initramfs = run.addOutputFileArg("initramfs.cpio");
+    run.addArgs(&.{ "file", "/init", "755" });
+    // Passing the binary as its own argument is what makes it a tracked input.
+    run.addArtifactArg(init);
+    return initramfs;
 }
