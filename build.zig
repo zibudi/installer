@@ -55,8 +55,8 @@ fn buildInitramfs(
 ) std.Build.LazyPath {
     const run = b.addRunArtifact(mkcpio);
     const initramfs = run.addOutputFileArg("initramfs.cpio");
-    run.addArgs(&.{ "file", "/init", "755" });
-    // Passing the binary as its own argument is what makes it a tracked input.
+    // The only two paths the build graph knows and mkcpio cannot. What goes
+    // in the archive is mkcpio's own business.
     run.addArtifactArg(init);
     return initramfs;
 }

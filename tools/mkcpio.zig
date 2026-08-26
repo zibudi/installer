@@ -1,11 +1,13 @@
-//! mkcpio <out> [ dir  <path> <mode>
-//!              | nod  <path> <mode> c|b <major> <minor>
-//!              | file <path> <mode> <source>
-//!              | link <path> <target> ]...
+//! Packs the initramfs.
 //!
-//! Drives libarchive's newc encoder rather than emitting the format here.
-//! Every field is stated instead of read off the build machine, so the same
-//! arguments produce the same bytes on any host.
+//!     mkcpio <out.cpio> <init>
+//!
+//! The archive's shape lives below in contents(), not in arguments -- the two
+//! paths are the only things the build graph knows and this program cannot.
+//!
+//! libarchive owns the newc encoding. Every field is stated rather than read
+//! off the build machine, so the same inputs give the same bytes anywhere,
+//! and a character device needs no root to describe.
 
 const std = @import("std");
 const c = @cImport({
@@ -13,112 +15,112 @@ const c = @cImport({
     @cInclude("archive_entry.h");
 });
 
-// archive_entry.h spells these as casts -- ((__LA_MODE_T)0040000) -- which
-// translate-c will not follow. They are the standard S_IF* values.
+/// archive_entry.h spells these as casts -- ((__LA_MODE_T)0040000) -- which
+/// translate-c will not follow. They are the standard S_IF* values.
 const AE = struct {
-    const IFREG: c_uint = 0o100000;
-    const IFLNK: c_uint = 0o120000;
-    const IFCHR: c_uint = 0o020000;
-    const IFBLK: c_uint = 0o060000;
-    const IFDIR: c_uint = 0o040000;
+    const REG: c_uint = 0o100000;
+    const LNK: c_uint = 0o120000;
+    const CHR: c_uint = 0o020000;
+    const DIR: c_uint = 0o040000;
 };
 
-pub fn main(init: std.process.Init) !void {
-    const io = init.io;
-    const arena = init.arena.allocator();
-    const argv = try init.minimal.args.toSlice(arena);
-    if (argv.len < 2) return error.MissingOutputPath;
-
-    const a = c.archive_write_new() orelse return error.ArchiveInit;
-    defer _ = c.archive_write_free(a);
-    if (c.archive_write_set_format_cpio_newc(a) != c.ARCHIVE_OK) return fail(a);
-    if (c.archive_write_open_filename(a, argv[1].ptr) != c.ARCHIVE_OK) return fail(a);
-
-    var ino: i64 = 1;
-    var i: usize = 2;
-    while (i < argv.len) {
-        const verb = argv[i];
-        if (std.mem.eql(u8, verb, "dir")) {
-            // Two links: the entry in its parent, and its own ".".
-            try emit(a, argv[i + 1], AE.IFDIR, try mode(argv[i + 2]), &ino, 2, 0, 0, "");
-            i += 3;
-        } else if (std.mem.eql(u8, verb, "nod")) {
-            const kind: c_uint = if (argv[i + 3][0] == 'b') AE.IFBLK else AE.IFCHR;
-            try emit(a, argv[i + 1], kind, try mode(argv[i + 2]), &ino, 1, try num(argv[i + 4]), try num(argv[i + 5]), "");
-            i += 6;
-        } else if (std.mem.eql(u8, verb, "file")) {
-            const bytes = try std.Io.Dir.cwd().readFileAlloc(io, argv[i + 3], arena, .unlimited);
-            try emit(a, argv[i + 1], AE.IFREG, try mode(argv[i + 2]), &ino, 1, 0, 0, bytes);
-            i += 4;
-        } else if (std.mem.eql(u8, verb, "link")) {
-            try emit(a, argv[i + 1], AE.IFLNK, 0o777, &ino, 1, 0, 0, argv[i + 2]);
-            i += 3;
-        } else return error.UnknownVerb;
-    }
-    if (c.archive_write_close(a) != c.ARCHIVE_OK) return fail(a);
+fn contents(w: *Writer) !void {
+    try w.file("/init", 0o755, w.arg_init);
 }
 
-fn emit(
+pub fn main(init: std.process.Init) !void {
+    const argv = try init.minimal.args.toSlice(init.arena.allocator());
+    if (argv.len < 3) return error.Usage;
+
+    var w: Writer = .{
+        .io = init.io,
+        .arena = init.arena.allocator(),
+        .a = c.archive_write_new() orelse return error.ArchiveInit,
+        .arg_init = argv[2],
+    };
+    defer _ = c.archive_write_free(w.a);
+
+    if (c.archive_write_set_format_cpio_newc(w.a) != c.ARCHIVE_OK) return w.fail();
+    if (c.archive_write_open_filename(w.a, argv[1].ptr) != c.ARCHIVE_OK) return w.fail();
+    try contents(&w);
+    if (c.archive_write_close(w.a) != c.ARCHIVE_OK) return w.fail();
+}
+
+const Writer = struct {
+    io: std.Io,
+    arena: std.mem.Allocator,
     a: *c.archive,
-    path: []const u8,
-    filetype: c_uint,
-    perm: u32,
-    ino: *i64,
-    nlink: c_uint,
-    major: u32,
-    minor: u32,
-    data: []const u8,
-) !void {
-    const e = c.archive_entry_new() orelse return error.EntryInit;
-    defer c.archive_entry_free(e);
+    arg_init: []const u8,
+    ino: i64 = 1,
 
-    var buf: [4096]u8 = undefined;
-    const z = try std.fmt.bufPrintZ(&buf, "{s}", .{path});
-    c.archive_entry_set_pathname(e, z.ptr);
-    c.archive_entry_set_filetype(e, @intCast(filetype));
-    c.archive_entry_set_perm(e, @intCast(perm));
-    c.archive_entry_set_nlink(e, @intCast(nlink));
+    fn file(w: *Writer, path: []const u8, mode: u32, source: []const u8) !void {
+        const bytes = try std.Io.Dir.cwd().readFileAlloc(w.io, source, w.arena, .unlimited);
+        try w.emit(path, AE.REG, mode, 1, 0, 0, bytes);
+    }
 
-    // Stated, never read: an archive that carries the build machine's clock
-    // and inode numbers is a different archive every time.
-    c.archive_entry_set_uid(e, 0);
-    c.archive_entry_set_gid(e, 0);
-    c.archive_entry_set_mtime(e, 0, 0);
-    c.archive_entry_set_ino(e, ino.*);
-    ino.* += 1;
+    fn dir(w: *Writer, path: []const u8, mode: u32) !void {
+        // Two links: the entry in its parent, and its own ".".
+        try w.emit(path, AE.DIR, mode, 2, 0, 0, "");
+    }
 
-    if (filetype == AE.IFCHR or filetype == AE.IFBLK) {
+    fn node(w: *Writer, path: []const u8, mode: u32, major: u32, minor: u32) !void {
+        try w.emit(path, AE.CHR, mode, 1, major, minor, "");
+    }
+
+    fn symlink(w: *Writer, path: []const u8, target: []const u8) !void {
+        try w.emit(path, AE.LNK, 0o777, 1, 0, 0, target);
+    }
+
+    fn emit(
+        w: *Writer,
+        path: []const u8,
+        filetype: c_uint,
+        mode: u32,
+        nlink: c_uint,
+        major: u32,
+        minor: u32,
+        data: []const u8,
+    ) !void {
+        const e = c.archive_entry_new() orelse return error.EntryInit;
+        defer c.archive_entry_free(e);
+
+        var buf: [4096]u8 = undefined;
+        const p = try std.fmt.bufPrintZ(&buf, "{s}", .{path});
+        c.archive_entry_set_pathname(e, p.ptr);
+        c.archive_entry_set_filetype(e, @intCast(filetype));
+        c.archive_entry_set_perm(e, @intCast(mode));
+        c.archive_entry_set_nlink(e, @intCast(nlink));
         c.archive_entry_set_rdevmajor(e, @intCast(major));
         c.archive_entry_set_rdevminor(e, @intCast(minor));
-    }
-    if (filetype == AE.IFLNK) {
-        const t = try std.fmt.bufPrintZ(buf[z.len + 1 ..], "{s}", .{data});
-        c.archive_entry_set_symlink(e, t.ptr);
-        // The newc writer stores the target where a file's body goes, and
-        // wants the length up front like any other entry.
+
+        // Stated, never read: an archive carrying the build machine's clock
+        // and inode numbers is a different archive every time.
+        c.archive_entry_set_uid(e, 0);
+        c.archive_entry_set_gid(e, 0);
+        c.archive_entry_set_mtime(e, 0, 0);
+        c.archive_entry_set_ino(e, w.ino);
+        w.ino += 1;
+
+        // A symlink's target is stored where a file's body goes, and the newc
+        // writer wants its length up front like any other entry.
+        if (filetype == AE.LNK) {
+            const t = try std.fmt.bufPrintZ(buf[p.len + 1 ..], "{s}", .{data});
+            c.archive_entry_set_symlink(e, t.ptr);
+        }
         c.archive_entry_set_size(e, @intCast(data.len));
-    } else {
-        c.archive_entry_set_size(e, @intCast(data.len));
+
+        if (c.archive_write_header(w.a, e) != c.ARCHIVE_OK) return w.fail();
+        if (filetype == AE.REG and data.len > 0) {
+            if (c.archive_write_data(w.a, data.ptr, data.len) < 0) return w.fail();
+        }
     }
 
-    if (c.archive_write_header(a, e) != c.ARCHIVE_OK) return fail(a);
-    if (filetype == AE.IFREG and data.len > 0) {
-        if (c.archive_write_data(a, data.ptr, data.len) < 0) return fail(a);
+    fn fail(w: *Writer) anyerror {
+        if (c.archive_error_string(w.a)) |msg| {
+            std.debug.print("mkcpio: {s}\n", .{std.mem.span(msg)});
+        } else {
+            std.debug.print("mkcpio: unknown libarchive error\n", .{});
+        }
+        return error.ArchiveFailed;
     }
-}
-
-fn fail(a: *c.archive) anyerror {
-    if (c.archive_error_string(a)) |msg| {
-        std.debug.print("mkcpio: {s}\n", .{std.mem.span(msg)});
-    } else {
-        std.debug.print("mkcpio: unknown libarchive error\n", .{});
-    }
-    return error.ArchiveFailed;
-}
-
-fn mode(s: []const u8) !u32 {
-    return std.fmt.parseInt(u32, s, 8);
-}
-fn num(s: []const u8) !u32 {
-    return std.fmt.parseInt(u32, s, 10);
-}
+};
