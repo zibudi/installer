@@ -32,7 +32,7 @@ fn claimConsole(io: std.Io, arena: std.mem.Allocator) !void {
     var last: []const u8 = "console";
     while (names.next()) |name| last = name;
 
-    linux.setsid();
+    _ = linux.setsid();
     const tty = try std.Io.Dir.openFileAbsolute(io, try std.fmt.allocPrint(arena, "/dev/{s}", .{last}), .{ .mode = .read_write });
     _ = linux.ioctl(tty.handle, linux.T.IOCSCTTY, 0);
 
