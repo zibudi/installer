@@ -10,7 +10,7 @@ pub fn main() void {
     _ = linux.mount("sysfs", "/sys", "sysfs", 0, 0);
     disks();
 
-    _ = linux.reboot(.MAGIC1, .MAGIC2, .POWER_OFF, null);
+    std.posix.reboot(.POWER_OFF) catch {};
     unreachable;
 }
 
