@@ -28,6 +28,7 @@ pub fn build(b: *std.Build) void {
     const initramfs = buildInitramfs(b, mkcpio, init, linux.namedLazyPath("modules"));
 
     b.getInstallStep().dependOn(&b.addInstallFile(initramfs, "initramfs.cpio").step);
+    b.getInstallStep().dependOn(&b.addInstallFile(kernel, "vmlinuz").step);
 
     const qemu = b.addSystemCommand(&.{
         "qemu-system-x86_64",

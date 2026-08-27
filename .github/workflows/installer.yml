@@ -32,6 +32,15 @@ jobs:
       # vaxis moves the cursor rather than writing spaces, so a phrase never
       # appears contiguously -- only single words do. '/dev/vda' is the ui's,
       # the kernel writes '[vda]'.
+      # Everything but the kernel cross-compiles on a mac, so this pair is all
+      # a local qemu needs.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bootable
+          path: |
+            zig-out/vmlinuz
+            zig-out/initramfs.cpio
+
       - name: it drew, it found the disk qemu gave it, and it left
         run: |
           grep -q 'zibudi' boot.log || { echo "the ui never drew"; exit 1; }
