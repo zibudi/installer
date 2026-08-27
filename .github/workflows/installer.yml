@@ -21,15 +21,19 @@ jobs:
 
       - run: zig build
 
+      # The q has to arrive after the ui is up, and the pipe has to stay open
+      # until then, or qemu sees EOF and the guest never gets the keystroke.
       - name: boot to the installer and quit it
         run: |
-          printf 'q' | timeout 300 zig build qemu > boot.log 2>&1 || true
+          (sleep 20; printf 'q') | timeout 300 zig build qemu > boot.log 2>&1 || true
           cat -v boot.log
 
-      # 'vda' alone would pass on the kernel's own virtio_blk line, so these
-      # assert on text only the ui produces.
+      # vaxis moves the cursor rather than writing spaces, so a phrase never
+      # appears contiguously -- only single words do. '/dev/vda' is the ui's,
+      # the kernel writes '[vda]'.
       - name: it drew, it found the disk qemu gave it, and it left
         run: |
-          grep -q 'select a disk' boot.log || { echo "the ui never drew"; exit 1; }
-          grep -q 'GB' boot.log || { echo "no disk enumerated"; exit 1; }
+          grep -q 'zibudi' boot.log || { echo "the ui never drew"; exit 1; }
+          grep -q '/dev/vda' boot.log || { echo "no disk enumerated"; exit 1; }
+          grep -q 'loop' boot.log && { echo "loop devices were offered as targets"; exit 1; }
           grep -q 'reboot: Power down' boot.log || { echo "init did not exit cleanly"; exit 1; }

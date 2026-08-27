@@ -89,12 +89,18 @@ fn disks(io: std.Io, arena: std.mem.Allocator) ![]const Disk {
 
     var it = dir.iterate();
     while (try it.next(io)) |entry| {
-        const path = try std.fmt.allocPrint(arena, "/sys/block/{s}/size", .{entry.name});
-        const size = std.Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(64)) catch continue;
-        const sectors = std.fmt.parseInt(u64, std.mem.trim(u8, size, " \n"), 10) catch continue;
+        const sectors = attribute(io, arena, entry.name, "size") orelse continue;
+        const removable = attribute(io, arena, entry.name, "removable") orelse continue;
+        if (sectors == 0 or removable != 0) continue;
         try found.append(arena, .{ .name = try arena.dupe(u8, entry.name), .bytes = sectors * 512 });
     }
     return found.items;
+}
+
+fn attribute(io: std.Io, arena: std.mem.Allocator, name: []const u8, of: []const u8) ?u64 {
+    const path = std.fmt.allocPrint(arena, "/sys/block/{s}/{s}", .{ name, of }) catch return null;
+    const text = std.Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(64)) catch return null;
+    return std.fmt.parseInt(u64, std.mem.trim(u8, text, " \n"), 10) catch null;
 }
 
 const Event = union(enum) {
