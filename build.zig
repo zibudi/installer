@@ -1,12 +1,15 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const target = b.resolveTargetQuery(.{ .cpu_arch = .x86_64, .os_tag = .linux });
+    const vaxis = b.dependency("vaxis", .{ .target = target, .optimize = .ReleaseSmall });
     const init = b.addExecutable(.{
         .name = "init",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/init.zig"),
-            .target = b.resolveTargetQuery(.{ .cpu_arch = .x86_64, .os_tag = .linux }),
+            .target = target,
             .optimize = .ReleaseSmall,
+            .imports = &.{.{ .name = "vaxis", .module = vaxis.module("vaxis") }},
         }),
     });
 
@@ -25,6 +28,7 @@ pub fn build(b: *std.Build) void {
     const initramfs = buildInitramfs(b, mkcpio, init, linux.namedLazyPath("modules"));
 
     b.getInstallStep().dependOn(&b.addInstallFile(initramfs, "initramfs.cpio").step);
+    b.getInstallStep().dependOn(&b.addInstallFile(kernel, "vmlinuz").step);
 
     const qemu = b.addSystemCommand(&.{
         "qemu-system-x86_64",
@@ -32,7 +36,12 @@ pub fn build(b: *std.Build) void {
         "q35",
         "-m",
         "512",
-        "-nographic",
+        "-display",
+        "none",
+        "-serial",
+        "stdio",
+        "-monitor",
+        "none",
         "-no-reboot",
         "-append",
         "console=ttyS0",
@@ -41,18 +50,20 @@ pub fn build(b: *std.Build) void {
     qemu.addFileArg(kernel);
     qemu.addArg("-initrd");
     qemu.addFileArg(initramfs);
-    qemu.addArg("-drive");
-    qemu.addPrefixedFileArg("if=virtio,format=raw,file=", scratchDisk(b));
+    for ([_][]const u8{ "256M", "3G" }) |size| {
+        qemu.addArg("-drive");
+        qemu.addPrefixedFileArg("if=virtio,format=raw,file=", scratchDisk(b, size));
+    }
     qemu.has_side_effects = true;
 
     b.step("qemu", "boot the initramfs and print what init says")
         .dependOn(&qemu.step);
 }
 
-fn scratchDisk(b: *std.Build) std.Build.LazyPath {
+fn scratchDisk(b: *std.Build, size: []const u8) std.Build.LazyPath {
     const create = b.addSystemCommand(&.{ "qemu-img", "create", "-f", "raw" });
     const img = create.addOutputFileArg("disk.img");
-    create.addArg("256M");
+    create.addArg(size);
     return img;
 }
 

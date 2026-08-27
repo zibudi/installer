@@ -1,0 +1,50 @@
+name: installer
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  boot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y bc bison flex kmod libelf-dev libssl-dev qemu-system-x86 qemu-utils
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - run: zig build
+
+      # A single keystroke into the guest's serial line goes missing often
+      # enough to fail a green build, so each is repeated. Both are safe to
+      # repeat: j clamps at the last disk, and the first enter returns.
+      - name: boot to the installer and quit it
+        run: |
+          (sleep 20; for i in 1 2 3; do printf 'j'; sleep 1; done; for i in 1 2 3; do printf '\r'; sleep 1; done; sleep 5) | timeout 120 zig build qemu > boot.log 2>&1 || true
+          cat -v boot.log
+
+      # vaxis moves the cursor rather than writing spaces, so a phrase never
+      # appears contiguously -- only single words do. '/dev/vda' is the ui's,
+      # the kernel writes '[vda]'.
+      # Everything but the kernel cross-compiles on a mac, so this pair is all
+      # a local qemu needs.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bootable
+          path: |
+            zig-out/vmlinuz
+            zig-out/initramfs.cpio
+
+      - name: it drew, it found the disk qemu gave it, and it left
+        run: |
+          grep -q 'zibudi' boot.log || { echo "the ui never drew"; exit 1; }
+          grep -q '/dev/vda' boot.log || { echo "no disk enumerated"; exit 1; }
+          grep -q '/dev/loop' boot.log && { echo "loop devices were offered as targets"; exit 1; }
+          grep -q 'installing to /dev/vdb' boot.log || { echo "j did not move the cursor, or enter did not select"; exit 1; }
+          grep -q 'reboot: Power down' boot.log || { echo "init did not exit cleanly"; exit 1; }
