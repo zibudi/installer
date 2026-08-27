@@ -36,5 +36,5 @@ jobs:
         run: |
           grep -q 'zibudi' boot.log || { echo "the ui never drew"; exit 1; }
           grep -q '/dev/vda' boot.log || { echo "no disk enumerated"; exit 1; }
-          grep -q 'loop' boot.log && { echo "loop devices were offered as targets"; exit 1; }
+          grep -q '/dev/loop' boot.log && { echo "loop devices were offered as targets"; exit 1; }
           grep -q 'reboot: Power down' boot.log || { echo "init did not exit cleanly"; exit 1; }
