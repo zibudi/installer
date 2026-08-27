@@ -50,18 +50,20 @@ pub fn build(b: *std.Build) void {
     qemu.addFileArg(kernel);
     qemu.addArg("-initrd");
     qemu.addFileArg(initramfs);
-    qemu.addArg("-drive");
-    qemu.addPrefixedFileArg("if=virtio,format=raw,file=", scratchDisk(b));
+    for ([_][]const u8{ "256M", "3G" }) |size| {
+        qemu.addArg("-drive");
+        qemu.addPrefixedFileArg("if=virtio,format=raw,file=", scratchDisk(b, size));
+    }
     qemu.has_side_effects = true;
 
     b.step("qemu", "boot the initramfs and print what init says")
         .dependOn(&qemu.step);
 }
 
-fn scratchDisk(b: *std.Build) std.Build.LazyPath {
+fn scratchDisk(b: *std.Build, size: []const u8) std.Build.LazyPath {
     const create = b.addSystemCommand(&.{ "qemu-img", "create", "-f", "raw" });
     const img = create.addOutputFileArg("disk.img");
-    create.addArg("256M");
+    create.addArg(size);
     return img;
 }
 

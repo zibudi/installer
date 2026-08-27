@@ -26,7 +26,7 @@ jobs:
       # Newline included in case the tty is still line-buffered.
       - name: boot to the installer and quit it
         run: |
-          (sleep 20; printf 'q\n'; sleep 5) | timeout 120 zig build qemu > boot.log 2>&1 || true
+          (sleep 20; printf 'j'; sleep 2; printf '\r'; sleep 5) | timeout 120 zig build qemu > boot.log 2>&1 || true
           cat -v boot.log
 
       # vaxis moves the cursor rather than writing spaces, so a phrase never
@@ -46,4 +46,5 @@ jobs:
           grep -q 'zibudi' boot.log || { echo "the ui never drew"; exit 1; }
           grep -q '/dev/vda' boot.log || { echo "no disk enumerated"; exit 1; }
           grep -q '/dev/loop' boot.log && { echo "loop devices were offered as targets"; exit 1; }
+          grep -q 'installing to /dev/vdb' boot.log || { echo "j did not move the cursor, or enter did not select"; exit 1; }
           grep -q 'reboot: Power down' boot.log || { echo "init did not exit cleanly"; exit 1; }

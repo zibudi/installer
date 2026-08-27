@@ -1,5 +1,6 @@
 const std = @import("std");
 const vaxis = @import("vaxis");
+const center = vaxis.widgets.alignment.center;
 const linux = std.os.linux;
 
 const wanted = [_][]const u8{ "virtio_blk", "nvme", "ahci", "sd_mod" };
@@ -11,7 +12,10 @@ pub fn main(init: std.process.Init) !void {
     try mountFilesystems(io);
     try claimConsole(io, arena);
     try loadDrivers(io, arena);
-    try present(io, arena, init.environ_map, try disks(io, arena));
+    if (try present(io, arena, init.environ_map, try disks(io, arena))) |disk| {
+        var out = std.Io.File.stdout().writer(io, &.{});
+        try out.interface.print("\ninstalling to /dev/{s}\n\n", .{disk.name});
+    }
 
     try std.posix.reboot(.POWER_OFF);
 }
@@ -108,7 +112,14 @@ const Event = union(enum) {
     winsize: vaxis.Winsize,
 };
 
-fn present(io: std.Io, arena: std.mem.Allocator, environ: *std.process.Environ.Map, found: []const Disk) !void {
+const frame: vaxis.Style = .{ .fg = .{ .index = 4 } };
+const heading: vaxis.Style = .{ .bold = true };
+const chosen_row: vaxis.Style = .{ .fg = .{ .index = 4 }, .reverse = true, .bold = true };
+const quiet: vaxis.Style = .{ .dim = true };
+
+const width = 46;
+
+fn present(io: std.Io, arena: std.mem.Allocator, environ: *std.process.Environ.Map, found: []const Disk) !?Disk {
     var buffer: [4096]u8 = undefined;
     var tty = try vaxis.Tty.init(io, &buffer);
     defer tty.deinit();
@@ -122,33 +133,52 @@ fn present(io: std.Io, arena: std.mem.Allocator, environ: *std.process.Environ.M
 
     try vx.enterAltScreen(tty.writer());
 
+    var cursor: usize = 0;
     while (true) {
-        const window = vx.window();
-        window.clear();
-        draw(window, arena, found);
+        draw(vx.window(), arena, found, cursor);
         try vx.render(tty.writer());
 
         switch (try loop.nextEvent()) {
-            .key_press => |key| if (key.matches('q', .{}) or key.matches(vaxis.Key.escape, .{})) return,
             .winsize => |size| try vx.resize(arena, tty.writer(), size),
+            .key_press => |key| {
+                if (key.matchesAny(&.{ 'q', vaxis.Key.escape }, .{})) return null;
+                if (key.matchesAny(&.{ 'k', vaxis.Key.up }, .{})) cursor -|= 1;
+                if (key.matchesAny(&.{ 'j', vaxis.Key.down }, .{})) cursor = @min(cursor + 1, found.len -| 1);
+                if (key.matches(vaxis.Key.enter, .{}) and found.len > 0) return found[cursor];
+            },
         }
     }
 }
 
-fn draw(window: vaxis.Window, arena: std.mem.Allocator, found: []const Disk) void {
-    _ = window.printSegment(.{ .text = "zibudi" }, .{ .row_offset = 0, .col_offset = 2 });
-    _ = window.printSegment(.{ .text = "select a disk to install to" }, .{ .row_offset = 1, .col_offset = 2 });
+fn draw(window: vaxis.Window, arena: std.mem.Allocator, found: []const Disk, cursor: usize) void {
+    window.clear();
+    const listed: u16 = @intCast(@max(found.len, 1));
+    const box = center(window, width, listed + 6).child(.{ .border = .{ .where = .all, .style = frame } });
+
+    _ = box.printSegment(.{ .text = "zibudi", .style = heading }, .{ .row_offset = 0, .col_offset = 1 });
+    _ = box.printSegment(.{ .text = "select a disk to install to", .style = quiet }, .{ .row_offset = 1, .col_offset = 1 });
 
     for (found, 0..) |disk, index| {
-        const line = std.fmt.allocPrint(arena, "/dev/{s}   {d:.1} GB", .{ disk.name, gigabytes(disk.bytes) }) catch continue;
-        _ = window.printSegment(.{ .text = line }, .{ .row_offset = @intCast(3 + index), .col_offset = 4 });
+        const row: u16 = @intCast(index + 3);
+        const style: vaxis.Style = if (index == cursor) chosen_row else .{};
+        const line = std.fmt.allocPrint(arena, " {s} {s}", .{ if (index == cursor) "\u{25b8}" else " ", disk.name }) catch continue;
+        const size = capacity(arena, disk.bytes);
+        _ = box.printSegment(.{ .text = line, .style = style }, .{ .row_offset = row, .col_offset = 1 });
+        _ = box.printSegment(.{ .text = size, .style = style }, .{ .row_offset = row, .col_offset = @intCast(width - 4 - size.len) });
     }
     if (found.len == 0)
-        _ = window.printSegment(.{ .text = "no disks found" }, .{ .row_offset = 3, .col_offset = 4 });
+        _ = box.printSegment(.{ .text = "  no disks found", .style = quiet }, .{ .row_offset = 3, .col_offset = 1 });
 
-    _ = window.printSegment(.{ .text = "q to quit" }, .{ .row_offset = @intCast(4 + found.len), .col_offset = 2 });
+    _ = box.printSegment(
+        .{ .text = "\u{2191}\u{2193} move    \u{23ce} install    q quit", .style = quiet },
+        .{ .row_offset = listed + 4, .col_offset = 1 },
+    );
 }
 
-fn gigabytes(bytes: u64) f64 {
-    return @as(f64, @floatFromInt(bytes)) / (1000.0 * 1000.0 * 1000.0);
+fn capacity(arena: std.mem.Allocator, bytes: u64) []const u8 {
+    const units = [_][]const u8{ "B", "KB", "MB", "GB", "TB" };
+    var value: f64 = @floatFromInt(bytes);
+    var unit: usize = 0;
+    while (value >= 1000 and unit + 1 < units.len) : (unit += 1) value /= 1000;
+    return std.fmt.allocPrint(arena, "{d:.0} {s}", .{ value, units[unit] }) catch "?";
 }
