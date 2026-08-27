@@ -23,9 +23,10 @@ jobs:
 
       # The q has to arrive after the ui is up, and the pipe has to stay open
       # until then, or qemu sees EOF and the guest never gets the keystroke.
+      # Newline included in case the tty is still line-buffered.
       - name: boot to the installer and quit it
         run: |
-          (sleep 20; printf 'q') | timeout 300 zig build qemu > boot.log 2>&1 || true
+          (sleep 20; printf 'q\n'; sleep 5) | timeout 120 zig build qemu > boot.log 2>&1 || true
           cat -v boot.log
 
       # vaxis moves the cursor rather than writing spaces, so a phrase never
