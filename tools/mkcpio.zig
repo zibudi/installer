@@ -1,22 +1,9 @@
-//! Packs the initramfs.
-//!
-//!     mkcpio <out.cpio> <init> <modules-dir>
-//!
-//! The archive's shape lives below in contents(), not in arguments -- the two
-//! paths are the only things the build graph knows and this program cannot.
-//!
-//! libarchive owns the newc encoding. Every field is stated rather than read
-//! off the build machine, so the same inputs give the same bytes anywhere,
-//! and a character device needs no root to describe.
-
 const std = @import("std");
 const c = @cImport({
     @cInclude("archive.h");
     @cInclude("archive_entry.h");
 });
 
-/// archive_entry.h spells these as casts -- ((__LA_MODE_T)0040000) -- which
-/// translate-c will not follow. They are the standard S_IF* values.
 const AE = struct {
     const REG: c_uint = 0o100000;
     const LNK: c_uint = 0o120000;
@@ -67,7 +54,6 @@ const Writer = struct {
     }
 
     fn dir(w: *Writer, path: []const u8, mode: u32) !void {
-        // Two links: the entry in its parent, and its own ".".
         try w.emit(path, AE.DIR, mode, 2, 0, 0, "");
     }
 
@@ -101,16 +87,12 @@ const Writer = struct {
         c.archive_entry_set_rdevmajor(e, @intCast(major));
         c.archive_entry_set_rdevminor(e, @intCast(minor));
 
-        // Stated, never read: an archive carrying the build machine's clock
-        // and inode numbers is a different archive every time.
         c.archive_entry_set_uid(e, 0);
         c.archive_entry_set_gid(e, 0);
         c.archive_entry_set_mtime(e, 0, 0);
         c.archive_entry_set_ino(e, w.ino);
         w.ino += 1;
 
-        // A symlink's target is stored where a file's body goes, and the newc
-        // writer wants its length up front like any other entry.
         if (filetype == AE.LNK) {
             const t = try std.fmt.bufPrintZ(buf[p.len + 1 ..], "{s}", .{data});
             c.archive_entry_set_symlink(e, t.ptr);
