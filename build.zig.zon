@@ -5,12 +5,16 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .linux = .{
-            .url = "git+https://github.com/zibudi/linux.git#6370a976bc754634edad257859c42710c1a4f42f",
-            .hash = "linux-6.12.103-6a1KLqkcAADaceEd1hZIrVEeb4OWqGioTH1UyQja2lVz",
+            .url = "git+https://github.com/zibudi/linux.git#cf1b74c877ff791d694305ecf7fa3e229e51477d",
+            .hash = "linux-6.12.103-6a1KLs8TAACVNlcUfcn6sgf5_jK7Zn1UCPS2qXg19Jxx",
         },
         .libarchive = .{
             .url = "git+https://github.com/zibudi/libarchive.git#6f90f2ac8054e3423cbc566da0c299b33ff12b91",
             .hash = "libarchive-3.8.1-cV3jE_JcAADHE8qr0hyq48R7d8EkFpiLVo4vnTEp_Enp",
+        },
+        .vaxis = .{
+            .url = "git+https://github.com/rockorager/libvaxis.git#c060d314930c5552b99a89278a6a695baf0352da",
+            .hash = "vaxis-0.6.0-BWNV_LC4CwBka_bJk8SOXqzCM-nyQH00jzdL0kUhGwRE",
         },
     },
     .paths = .{

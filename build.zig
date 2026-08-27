@@ -1,12 +1,15 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const target = b.resolveTargetQuery(.{ .cpu_arch = .x86_64, .os_tag = .linux });
+    const vaxis = b.dependency("vaxis", .{ .target = target, .optimize = .ReleaseSmall });
     const init = b.addExecutable(.{
         .name = "init",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/init.zig"),
-            .target = b.resolveTargetQuery(.{ .cpu_arch = .x86_64, .os_tag = .linux }),
+            .target = target,
             .optimize = .ReleaseSmall,
+            .imports = &.{.{ .name = "vaxis", .module = vaxis.module("vaxis") }},
         }),
     });
 

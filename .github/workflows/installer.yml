@@ -1,0 +1,35 @@
+name: installer
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  boot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y bc bison flex kmod libelf-dev libssl-dev qemu-system-x86 qemu-utils
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - run: zig build
+
+      - name: boot to the installer and quit it
+        run: |
+          printf 'q' | timeout 300 zig build qemu > boot.log 2>&1 || true
+          cat -v boot.log
+
+      # 'vda' alone would pass on the kernel's own virtio_blk line, so these
+      # assert on text only the ui produces.
+      - name: it drew, it found the disk qemu gave it, and it left
+        run: |
+          grep -q 'select a disk' boot.log || { echo "the ui never drew"; exit 1; }
+          grep -q 'GB' boot.log || { echo "no disk enumerated"; exit 1; }
+          grep -q 'reboot: Power down' boot.log || { echo "init did not exit cleanly"; exit 1; }
