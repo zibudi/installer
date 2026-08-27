@@ -183,27 +183,35 @@ fn present(io: std.Io, arena: std.mem.Allocator, environ: *std.process.Environ.M
 
 fn draw(window: vaxis.Window, arena: std.mem.Allocator, found: []const Disk, cursor: usize) void {
     window.clear();
-    const box = center(window, window.width -| 4, window.height -| 2)
+    const listed: u16 = @intCast(@max(found.len, 1));
+    const card = center(window, @min(window.width -| 4, 72), @min(window.height -| 2, listed + 7))
         .child(.{ .border = .{ .where = .all, .style = frame } });
 
-    _ = box.printSegment(.{ .text = "zibudi", .style = heading }, .{ .row_offset = 0, .col_offset = 1 });
-    _ = box.printSegment(.{ .text = "select a disk to install to", .style = quiet }, .{ .row_offset = 1, .col_offset = 1 });
+    _ = card.printSegment(.{ .text = "zibudi", .style = heading }, .{ .row_offset = 0, .col_offset = 2 });
+    _ = card.printSegment(.{ .text = "select a disk to install to", .style = quiet }, .{ .row_offset = 1, .col_offset = 2 });
 
     for (found, 0..) |disk, index| {
-        const row: u16 = @intCast(index + 3);
-        const style: vaxis.Style = if (index == cursor) chosen_row else .{};
-        const line = std.fmt.allocPrint(arena, " {s} /dev/{s}", .{ if (index == cursor) "\u{25b8}" else " ", disk.name }) catch continue;
-        const size = capacity(arena, disk.bytes);
-        _ = box.printSegment(.{ .text = line, .style = style }, .{ .row_offset = row, .col_offset = 1 });
-        _ = box.printSegment(.{ .text = size, .style = style }, .{ .row_offset = row, .col_offset = @intCast(box.width -| 2 -| size.len) });
+        _ = card.printSegment(.{
+            .text = listing(arena, card.width, disk),
+            .style = if (index == cursor) chosen_row else .{},
+        }, .{ .row_offset = @intCast(index + 3), .col_offset = 0 });
     }
     if (found.len == 0)
-        _ = box.printSegment(.{ .text = "  no disks found", .style = quiet }, .{ .row_offset = 3, .col_offset = 1 });
+        _ = card.printSegment(.{ .text = "  no disks found", .style = quiet }, .{ .row_offset = 3, .col_offset = 0 });
 
-    _ = box.printSegment(
+    _ = card.printSegment(
         .{ .text = "\u{2191}\u{2193} move    \u{23ce} install    q quit", .style = quiet },
-        .{ .row_offset = box.height -| 1, .col_offset = 1 },
+        .{ .row_offset = card.height -| 1, .col_offset = 2 },
     );
+}
+
+fn listing(arena: std.mem.Allocator, width: u16, disk: Disk) []const u8 {
+    const size = capacity(arena, disk.bytes);
+    const line = arena.alloc(u8, width) catch return disk.name;
+    @memset(line, ' ');
+    _ = std.fmt.bufPrint(line, "  /dev/{s}", .{disk.name}) catch {};
+    if (size.len + 2 <= width) @memcpy(line[width -| size.len -| 2..][0..size.len], size);
+    return line;
 }
 
 fn capacity(arena: std.mem.Allocator, bytes: u64) []const u8 {

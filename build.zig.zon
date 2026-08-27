@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .linux = .{
-            .url = "git+https://github.com/zibudi/linux.git#cf1b74c877ff791d694305ecf7fa3e229e51477d",
-            .hash = "linux-6.12.103-6a1KLs8TAACVNlcUfcn6sgf5_jK7Zn1UCPS2qXg19Jxx",
+            .url = "git+https://github.com/zibudi/linux.git#e8b9449b18aca58c2657f9493b235247435f280a",
+            .hash = "linux-6.12.103-6a1KLs8TAADPLcPX7HStaTSgz9kKdsCOjeaB-CKaSCwA",
         },
         .libarchive = .{
             .url = "git+https://github.com/zibudi/libarchive.git#6f90f2ac8054e3423cbc566da0c299b33ff12b91",
