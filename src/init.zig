@@ -98,7 +98,12 @@ fn disks(io: std.Io, arena: std.mem.Allocator) ![]const Disk {
         if (sectors == 0 or removable != 0) continue;
         try found.append(arena, .{ .name = try arena.dupe(u8, entry.name), .bytes = sectors * 512 });
     }
+    std.mem.sort(Disk, found.items, {}, byName);
     return found.items;
+}
+
+fn byName(_: void, a: Disk, b: Disk) bool {
+    return std.mem.lessThan(u8, a.name, b.name);
 }
 
 fn attribute(io: std.Io, arena: std.mem.Allocator, name: []const u8, of: []const u8) ?u64 {
