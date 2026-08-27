@@ -39,9 +39,37 @@ fn claimConsole(io: std.Io, arena: std.mem.Allocator) !void {
     var size: std.posix.winsize = undefined;
     _ = linux.ioctl(tty.handle, linux.T.IOCGWINSZ, @intFromPtr(&size));
     if (size.col == 0) {
-        size = .{ .row = 24, .col = 80, .xpixel = 0, .ypixel = 0 };
+        size = measure(tty.handle) orelse .{ .row = 24, .col = 80, .xpixel = 0, .ypixel = 0 };
         _ = linux.ioctl(tty.handle, linux.T.IOCSWINSZ, @intFromPtr(&size));
     }
+}
+
+fn measure(handle: std.posix.fd_t) ?std.posix.winsize {
+    const saved = std.posix.tcgetattr(handle) catch return null;
+    var raw = saved;
+    raw.lflag.ICANON = false;
+    raw.lflag.ECHO = false;
+    raw.cc[@intFromEnum(std.posix.V.MIN)] = 0;
+    raw.cc[@intFromEnum(std.posix.V.TIME)] = 20;
+    std.posix.tcsetattr(handle, .FLUSH, raw) catch return null;
+    defer std.posix.tcsetattr(handle, .FLUSH, saved) catch {};
+
+    const ask = "\x1b[9999;9999H\x1b[6n";
+    _ = linux.write(handle, ask.ptr, ask.len);
+
+    var buf: [32]u8 = undefined;
+    const n: isize = @bitCast(linux.read(handle, &buf, buf.len));
+    if (n < 6) return null;
+    const reply = buf[0..@intCast(n)];
+    if (reply[0] != 0x1b or reply[1] != '[') return null;
+    const semi = std.mem.indexOfScalar(u8, reply, ';') orelse return null;
+    const end = std.mem.indexOfScalar(u8, reply, 'R') orelse return null;
+    return .{
+        .row = std.fmt.parseInt(u16, reply[2..semi], 10) catch return null,
+        .col = std.fmt.parseInt(u16, reply[semi + 1 .. end], 10) catch return null,
+        .xpixel = 0,
+        .ypixel = 0,
+    };
 }
 
 fn loadDrivers(io: std.Io, arena: std.mem.Allocator) !void {
@@ -122,8 +150,6 @@ const heading: vaxis.Style = .{ .bold = true };
 const chosen_row: vaxis.Style = .{ .fg = .{ .index = 4 }, .reverse = true, .bold = true };
 const quiet: vaxis.Style = .{ .dim = true };
 
-const width = 46;
-
 fn present(io: std.Io, arena: std.mem.Allocator, environ: *std.process.Environ.Map, found: []const Disk) !?Disk {
     var buffer: [4096]u8 = undefined;
     var tty = try vaxis.Tty.init(io, &buffer);
@@ -157,8 +183,8 @@ fn present(io: std.Io, arena: std.mem.Allocator, environ: *std.process.Environ.M
 
 fn draw(window: vaxis.Window, arena: std.mem.Allocator, found: []const Disk, cursor: usize) void {
     window.clear();
-    const listed: u16 = @intCast(@max(found.len, 1));
-    const box = center(window, width, listed + 6).child(.{ .border = .{ .where = .all, .style = frame } });
+    const box = center(window, window.width -| 4, window.height -| 2)
+        .child(.{ .border = .{ .where = .all, .style = frame } });
 
     _ = box.printSegment(.{ .text = "zibudi", .style = heading }, .{ .row_offset = 0, .col_offset = 1 });
     _ = box.printSegment(.{ .text = "select a disk to install to", .style = quiet }, .{ .row_offset = 1, .col_offset = 1 });
@@ -169,14 +195,14 @@ fn draw(window: vaxis.Window, arena: std.mem.Allocator, found: []const Disk, cur
         const line = std.fmt.allocPrint(arena, " {s} /dev/{s}", .{ if (index == cursor) "\u{25b8}" else " ", disk.name }) catch continue;
         const size = capacity(arena, disk.bytes);
         _ = box.printSegment(.{ .text = line, .style = style }, .{ .row_offset = row, .col_offset = 1 });
-        _ = box.printSegment(.{ .text = size, .style = style }, .{ .row_offset = row, .col_offset = @intCast(width - 4 - size.len) });
+        _ = box.printSegment(.{ .text = size, .style = style }, .{ .row_offset = row, .col_offset = @intCast(box.width -| 2 -| size.len) });
     }
     if (found.len == 0)
         _ = box.printSegment(.{ .text = "  no disks found", .style = quiet }, .{ .row_offset = 3, .col_offset = 1 });
 
     _ = box.printSegment(
         .{ .text = "\u{2191}\u{2193} move    \u{23ce} install    q quit", .style = quiet },
-        .{ .row_offset = listed + 4, .col_offset = 1 },
+        .{ .row_offset = box.height -| 1, .col_offset = 1 },
     );
 }
 
